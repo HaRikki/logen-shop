@@ -22,3 +22,5 @@ services:
       - {key: SUPPLIER_API_KEY, sync: false}
       - {key: PAYMENT_WEBHOOK_SECRET, sync: false}
       - {key: BOT_TOKEN, sync: false}
+      - {key: ADMIN_CHAT_ID, sync: false}
+      - {key: PUBLIC_URL, sync: false}

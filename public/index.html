@@ -94,6 +94,10 @@ body.auth{background:radial-gradient(900px 460px at 78% -8%,color-mix(in srgb,va
 .d-steps{display:flex;justify-content:space-between;font-size:12px;color:var(--mut)}
 .facts{list-style:none;margin:14px 0 0;padding:0;display:grid;gap:12px}.facts li{display:flex;gap:12px;align-items:flex-start}.facts b{display:block;font-size:14px}.facts .mut{display:block}
 @media(min-width:900px){.auth-wrap{max-width:1040px;grid-template-columns:1.1fr 440px;column-gap:56px;align-content:center;padding:40px 32px}.a-top{grid-column:1;grid-row:1;align-self:end}.a-demo{grid-column:1;grid-row:2;align-self:start;max-width:480px}.a-form{grid-column:2;grid-row:1/3;align-self:center}.a-top h1{font-size:40px}}
+/* telegram login button */
+.tgb{display:inline-flex;align-items:center;justify-content:center;gap:10px;border:1.5px solid;font:inherit;font-weight:600;cursor:pointer;transition:transform .12s,filter .12s}.tgb:hover{filter:brightness(1.07)}.tgb:active{transform:scale(.98)}
+.or{display:flex;align-items:center;gap:12px;color:var(--mut);font-size:13px;margin:16px 0}.or::before,.or::after{content:"";flex:1;height:1px;background:var(--bd)}
+input[type=range]{padding:0;height:30px;border:0;background:none;accent-color:var(--pri)}
 /* admin + editor */
 .atabs{display:flex;gap:8px;overflow-x:auto;margin:0 -14px 10px;padding:2px 14px 8px;scrollbar-width:none}.atabs::-webkit-scrollbar{display:none}
 .stat{border-radius:var(--r2);background:var(--card);border:1px solid var(--bd);padding:14px;box-shadow:var(--sh);text-align:left;cursor:default}.stat.hot{border-color:var(--warn);cursor:pointer}.stat b{font-size:24px;display:block;font-variant-numeric:tabular-nums}
@@ -131,6 +135,9 @@ const logo=s=>CFG.logo?`<img class="logo" src="${esc(CFG.logo)}" width="${s}" he
 function applyBrand(){const a=okHex(CFG.accent)?CFG.accent:'#1769e0',r=document.documentElement.style;bv(a).split(';').forEach(x=>{const i=x.indexOf(':');r.setProperty(x.slice(0,i),x.slice(i+1))});
  document.title=CFG.brand||'SMM Store';$('#hb').innerHTML=logo(34)+`<span>${esc(CFG.brand||'SMM Store')}</span>`;document.querySelector('meta[name=theme-color]').content=a;
  $('#fav').href=CFG.logo||'data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" rx="11" fill="'+a+'"/><path d="M10 27l7-7 5 4 8-9" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>')}
+function tgBtn(c,id=''){const col=okHex(c.color)?c.color:'#27a7e7',sz={small:'8px 14px;font-size:13px',medium:'12px 18px;font-size:15px',large:'15px 22px;font-size:16px'}[c.size]||'12px 18px;font-size:15px',
+ st=c.style==='outline'?`background:transparent;color:${col};border-color:${col}`:c.style==='soft'?`background:color-mix(in srgb,${col} 14%,transparent);color:${col};border-color:transparent`:`background:${col};color:${lum(col)>.62?'#0a1d36':'#fff'};border-color:${col}`;
+ return `<button type="button" class="tgb" ${id?`id="${id}"`:''} style="${st};padding:${sz};border-radius:${Math.max(0,Math.min(30,+c.radius||0))}px;${c.wide?'width:100%':''}">${c.icon?ic('plane',c.size==='small'?16:20):''}<span>${esc(c.text||'Continue with Telegram')}</span></button>`}
 /* ---------- helpers ---------- */
 const fld=(n,l,v='',t='text',x='')=>Array.isArray(t)?`<label>${l}<select name="${n}">${t.map(o=>`<option ${o==v?'selected':''}>${esc(o)}</option>`).join('')}</select></label>`:t==='area'?`<label>${l}<textarea name="${n}" rows="4" ${x}>${esc(v)}</textarea></label>`:`<label>${l}<input name="${n}" type="${t}" value="${esc(v)}" ${x}></label>`;
 const chk=(n,l,v)=>`<label class="ck"><input type="checkbox" name="${n}" ${v?'checked':''}> ${l}</label>`;
@@ -175,21 +182,32 @@ function authScreen(){document.body.classList.add('auth');let reg=0,busy=0;const
   ${reg?`<label>Email (optional)<div class="in">${ic('headset',18)}<input name="email" type="email" autocomplete="email"></div></label>`:''}
   <label>Password${reg?' (8+ characters)':''}<div class="in">${ic('lock',18)}<input name="password" type="password" autocomplete="${reg?'new-password':'current-password'}" required><button type="button" class="eye" aria-label="Show password">${ic('eye',18)}</button></div></label>
   <button class="btn blk" id="go">${reg?'Create account':'Log in'}</button></form>
+  ${CFG.tgl&&!(TG&&TG.initData)?`<div class="or"><span>or</span></div>${tgBtn(CFG.tgl,'tgb')}`:''}
   ${CFG.support_link?`<p class="mut" style="text-align:center;margin:14px 0 0">Need help? <a href="${esc(CFG.support_link)}" target="_blank" rel="noopener" style="color:var(--pri-t);font-weight:600">Contact support</a></p>`:''}</section>
  <section class="a-demo"><div class="demo"><div class="row"><div class="row st">${cico('TikTok')}<div><b>Followers · 1,000</b><div class="mut">Example order</div></div></div><span class="d-st"><span class="s1">Paid</span><span class="s2">In progress</span><span class="s3">Completed</span></span></div><div class="bar"><i></i></div><div class="d-steps"><span>Paid</span><span>Started</span><span>Delivered</span></div></div>
  <ul class="facts"><li><span class="ico">${ic('qr')}</span><div><b>Top up with ABA KHQR</b><span class="mut">Your balance is added once the payment is confirmed.</span></div></li><li><span class="ico" style="--c:var(--gold)">${ic('bolt')}</span><div><b>Instant digital delivery</b><span class="mut">Keys and accounts from the store arrive right after you buy.</span></div></li><li><span class="ico" style="--c:var(--ok)">${ic('shield')}</span><div><b>Automatic refunds</b><span class="mut">Failed or cancelled orders go back to your balance.</span></div></li></ul></section></div>`;
   $('#main').querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>{reg=+b.dataset.m;draw()});
   const eye=$('#main .eye');eye.onclick=()=>{const i=eye.previousElementSibling,h=i.type==='password';i.type=h?'text':'password';eye.innerHTML=ic(h?'eyeoff':'eye',18)};
+  const tb=$('#tgb');tb&&(tb.onclick=()=>{tb.disabled=1;tb.style.opacity='.7';location.href='/api/auth/telegram/start'});
   $('#af').onsubmit=async e=>{e.preventDefault();if(busy)return;const f=Object.fromEntries(new FormData(e.target));
    if(reg&&!/^\w{3,32}$/.test(f.username||''))return draw('Username must be 3-32 letters, digits or _');if(reg&&(f.password||'').length<8)return draw('Password must be at least 8 characters');if(!f.username||!f.password)return draw('Enter your username and password');
    busy=1;const b=$('#go');b.disabled=1;b.innerHTML='<span class="spin"></span> Please wait';
    try{const r=await api(reg?'/auth/register':'/auth/login',{b:f});T=r.token;localStorage.t=T;busy=0;boot()}catch(x){busy=0;draw(x.message)}}};
- $('#nav').style.display='none';draw()}
-function logout(){localStorage.removeItem('t');T=null;U=null;for(const k in CACHE)delete CACHE[k];authScreen()}
-async function boot(){try{CFG=await api('/config');applyBrand();
+ $('#nav').style.display='none';const e0=window.TGERR||'';window.TGERR='';draw(e0)}
+const ADMIN_PATH=/^\/admin1\/?$/i.test(location.pathname),loginScreen=m=>ADMIN_PATH?adminScreen(m):authScreen();
+function adminScreen(msg=''){document.body.classList.add('auth');$('#nav').style.display='none';const mn=$('#main');mn.style.maxWidth='none';mn.style.padding='0';
+ mn.innerHTML=`<div class="auth-wrap" style="min-height:100dvh;align-content:center"><section class="a-form"><div class="bn" style="margin-bottom:18px">${logo(40)}<span>${esc(CFG.brand||'SMM Store')}</span></div><h2>Admin sign in</h2><div class="mut">Only administrators can use this page.</div>${msg?`<div class="err" role="alert">${esc(msg)}</div>`:''}
+ <form id="af" novalidate><label>Username<div class="in">${ic('user',18)}<input name="username" autocomplete="username" autocapitalize="none" required></div></label><label>Password<div class="in">${ic('lock',18)}<input name="password" type="password" autocomplete="current-password" required><button type="button" class="eye" aria-label="Show password">${ic('eye',18)}</button></div></label><button class="btn blk" id="go">Sign in</button></form>${T?`<p class="mut" style="text-align:center;margin:14px 0 0"><a href="#" id="lo" style="color:var(--pri-t);font-weight:600">Sign out of this account</a></p>`:''}</section></div>`;
+ const eye=$('#main .eye');eye.onclick=()=>{const i=eye.previousElementSibling,h=i.type==='password';i.type=h?'text':'password';eye.innerHTML=ic(h?'eyeoff':'eye',18)};
+ const lo=$('#lo');lo&&(lo.onclick=e=>{e.preventDefault();localStorage.removeItem('t');T=null;U=null;adminScreen()});
+ $('#af').onsubmit=async e=>{e.preventDefault();const f=Object.fromEntries(new FormData(e.target));if(!f.username||!f.password)return adminScreen('Enter your username and password');const b=$('#go');b.disabled=1;b.innerHTML='<span class="spin"></span> Please wait';
+  try{const r=await api('/auth/login',{b:f});if(!r.user||r.user.role!=='admin')return adminScreen('This account does not have admin access');T=r.token;localStorage.t=T;boot()}catch(x){adminScreen(x.message)}}}
+function logout(){localStorage.removeItem('t');T=null;U=null;for(const k in CACHE)delete CACHE[k];loginScreen()}
+async function boot(){const h=location.hash,i=h.indexOf('=');if(/^#tg(token|err)=/.test(h)){const k=h.slice(1,i),v=decodeURIComponent(h.slice(i+1));history.replaceState(null,'',location.pathname+location.search);if(k==='tgtoken'){T=v;localStorage.t=v}else window.TGERR=v}
+ try{CFG=await api('/config');applyBrand();
   if(!T&&TG&&TG.initData){TG.ready();TG.expand();try{const r=await api('/auth/telegram',{b:{initData:TG.initData}});T=r.token;localStorage.t=T}catch{}}
-  if(!T)return authScreen();U=await api('/me');const mn=$('#main');mn.style.maxWidth='';mn.style.padding='';document.body.classList.remove('auth');$('#nav').style.display='';$('#pf').innerHTML=`<span>${esc(U.username[0].toUpperCase())}</span>`;go('home')}
- catch(e){if(!T)authScreen();else{document.body.classList.remove('auth');$('#main').innerHTML=`<div class="card">${empty('Could not connect',esc(e.message),'<br><button class="btn s" onclick="boot()">Try again</button>')}</div>`}}}
+  if(!T)return loginScreen();U=await api('/me');if(ADMIN_PATH&&U.role!=='admin')return adminScreen('This account does not have admin access');const mn=$('#main');mn.style.maxWidth='';mn.style.padding='';document.body.classList.remove('auth');$('#nav').style.display='';$('#pf').innerHTML=`<span>${esc(U.username[0].toUpperCase())}</span>`;if(ADMIN_PATH){atab='stats';go('admin')}else go('home')}
+ catch(e){if(!T)loginScreen();else{document.body.classList.remove('auth');$('#main').innerHTML=`<div class="card">${empty('Could not connect',esc(e.message),'<br><button class="btn s" onclick="boot()">Try again</button>')}</div>`}}}
 /* ---------- customer pages ---------- */
 const sv=s=>`<div class="card sv">${cico(s.category)}<div class="sb"><b>${esc(s.name)}</b><div class="mut">${esc(s.category)} · ${nf(s.min_qty)}–${nf(s.max_qty)}${s.delivery?' · '+esc(s.delivery):''}</div></div><div class="sr2"><span><b>${m(s.price)}</b><span class="mut"> /1k</span></span><button class="btn s" onclick="orderSvc(${s.id})">Order</button></div></div>`;
 const svMini=s=>`<div class="mini"><div class="row st">${cico(s.category,20)}<span class="mut">${esc(s.category)}</span></div><b>${esc(s.name)}</b><div class="row"><span><b style="min-height:0;display:inline">${m(s.price)}</b><span class="mut"> /1k</span></span><button class="btn s" onclick="orderSvc(${s.id})">Order</button></div></div>`;
@@ -238,7 +256,7 @@ P.support=async()=>{const t=await api('/tickets');return `<div class="row"><h3>S
 function newTicket(){modal('New ticket',fld('subject','Subject')+fld('message','Message','','area'),async(f,o)=>{await api('/tickets',{b:f});o.remove();go('support')},'Send')}
 async function ticket(id){const r=await api('/tickets/'+id);modal('#'+id+' '+r.ticket.subject,r.messages.map(x=>`<div class="card" style="${x.is_admin?'border-color:var(--pri)':''}"><span class="mut">${x.is_admin?'Support':'User'} · ${d(x.created)}</span><br>${esc(x.body)}</div>`).join('')+fld('message','Reply','','area'),async(f,o)=>{await api(`/tickets/${id}/reply`,{b:f});o.remove();ticket(id)},'Send reply')}
 /* ---------- admin ---------- */
-const AT=[['stats','Overview'],['payments','Payments','pending_payments'],['digital','Digital orders','digital_pending'],['smm','Service orders','smm_active'],['services','Services'],['products','Products'],['users','Users'],['tickets','Tickets','open_tickets'],['promos','Offers'],['settings','Site editor'],['logs','Logs']];
+const AT=[['stats','Overview'],['payments','Payments','pending_payments'],['digital','Digital orders','digital_pending'],['smm','Service orders','smm_active'],['services','Services'],['products','Products'],['users','Users'],['tickets','Tickets','open_tickets'],['promos','Offers'],['settings','Site editor'],['login','Login'],['logs','Logs']];
 const ad=(p,o)=>api('/admin'+p,o);let AF={q:'',st:'all'},ASV=[],APR=[],SEL=new Set(),lastTab='';
 P.admin=async()=>{if(lastTab!==atab){AF={q:'',st:'all'};SEL.clear();lastTab=atab}const s=await ad('/stats'),body=await AP[atab](s);
  return `<div class="atabs">${AT.map(t=>`<span class="chip ${t[0]===atab?'on':''}" role="button" tabindex="0" onclick="atab='${t[0]}';go('admin')">${t[1]}${t[2]&&s[t[2]]?`<span class="bd2">${s[t[2]]}</span>`:''}</span>`).join('')}</div>`+body};
@@ -265,6 +283,23 @@ settings:async()=>{const s=await ad('/settings'),a=okHex(s.accent)?s.accent:'#17
  <fieldset><legend>Payments</legend>${fld('aba_name','ABA account name',s.aba_name)}${fld('aba_account','ABA account number',s.aba_account)}${imgField('khqr_image','KHQR image',s.khqr_image,720,'image/png',1)}${fld('min_deposit','Minimum deposit (USD)',s.min_deposit||1,'number','step="0.01" min="0"')}</fieldset>
  <div class="savebar"><button class="btn blk" id="sv">Save changes</button></div></form>
  <div class="pv"><div class="mut" style="margin-bottom:8px">Live preview</div><div class="phone" id="pv" style="${bv(a)}"><div class="bn" id="pvb"></div><div class="ann" id="pva" ${s.announcement?'':'hidden'}>${ic('megaphone',16)}<span></span></div><div class="wallet"><div class="w-hi">Hi, customer</div><div class="w-bal">$12.50</div><span class="btn s wh">${ic('plus',14)} Add funds</span></div><div class="mut" id="pvt"></div></div></div></div>`},
+login:async()=>{const t=(await ad('/login')).telegram,o=location.origin,uri=o+'/api/auth/telegram/callback',cp=v=>`<button type="button" data-copy="${esc(v)}" aria-label="Copy">${ic('copy',16)}</button>`;
+ return `<div class="ed two"><form id="lf" novalidate>
+ <fieldset><legend>Telegram login</legend>${chk('enabled','Show the Telegram button on the customer login screen',t.enabled)}
+ <div class="mut" style="margin-bottom:10px">Open <b>@BotFather</b> → your bot → <b>Login Widget</b>. Add these two links as Allowed URLs, then copy the Client ID and Client Secret into the boxes below.</div>
+ <div class="copy"><div><span class="mut">Website URL</span><br><b>${esc(o)}</b></div>${cp(o)}</div>
+ <div class="copy"><div><span class="mut">Redirect URL</span><br><b>${esc(uri)}</b></div>${cp(uri)}</div>
+ ${fld('client_id','Client ID',t.client_id,'text','inputmode="numeric" autocomplete="off"')}
+ ${fld('client_secret','Client Secret','','password',`autocomplete="new-password" placeholder="${t.secret_set?'Saved. Leave blank to keep it':'Paste the secret from BotFather'}"`)}
+ ${t.secret_set?`<button type="button" class="btn s r" style="margin:-4px 0 10px" onclick="if(confirm('Remove the saved secret and turn Telegram login off?'))act(()=>ad('/login/telegram',{m:'PUT',b:{clear_secret:1}}),'Secret removed')">Remove saved secret</button>`:''}</fieldset>
+ <fieldset><legend>Button editor</legend>${fld('text','Button text',t.text,'text','maxlength="40"')}
+ <div class="row" style="align-items:flex-start"><div class="grow">${fld('style','Style',t.style,['filled','outline','soft'])}</div><div class="grow">${fld('size','Size',t.size,['small','medium','large'])}</div></div>
+ <label>Colour<input type="color" name="color" value="${esc(t.color)}"></label><div class="sw">${['#27a7e7','#229ed9','#0088cc','#1769e0','#0a1d36','#7c3aed'].map(c=>`<button type="button" style="background:${c}" data-set="color=${c}" aria-label="${c}"></button>`).join('')}</div>
+ <label>Corner radius: <span id="rv">${t.radius}</span> px<input type="range" name="radius" min="0" max="30" value="${t.radius}"></label>
+ ${chk('icon','Show the Telegram icon',t.icon)}${chk('wide','Full width button',t.wide)}</fieldset>
+ <fieldset><legend>Google login</legend><div class="mut" style="padding:4px 0 12px">Coming next. It will be managed here in the same way.</div></fieldset>
+ <div class="savebar"><button class="btn blk" id="lsv">Save changes</button></div></form>
+ <div class="pv"><div class="mut" style="margin-bottom:8px">Live preview</div><div class="phone"><div class="bn">${logo(30)}<span>${esc(CFG.brand||'SMM Store')}</span></div><h3>Welcome back</h3><div class="mut" style="margin-bottom:12px">Log in to see your balance and orders.</div><div class="btn blk" style="pointer-events:none">Log in</div><div class="or"><span>or</span></div><div id="lpb"></div></div></div></div>`},
 logs:async()=>(await ad('/logs')).map(l=>`<div class="card mut"><b>${esc(l.action)}</b> · ${esc(l.username||'system')} · ${d(l.created)}<br>${esc(l.detail)}</div>`).join('')};
 function pvUpdate(f){const v=Object.fromEntries(new FormData(f)),pv=$('#pv');if(!pv)return;const a=okHex(v.accent)?v.accent:'#1769e0';pv.style.cssText=bv(a);
  $('#pvb').innerHTML=(v.logo?`<img class="logo" src="${esc(v.logo)}" width="30" height="30" alt="">`:MARK(30))+`<span>${esc(v.brand||'Shop name')}</span>`;
@@ -272,6 +307,12 @@ function pvUpdate(f){const v=Object.fromEntries(new FormData(f)),pv=$('#pv');if(
 document.addEventListener('input',e=>{const f=e.target.closest('#sf');f&&pvUpdate(f)});
 document.addEventListener('submit',async e=>{if(e.target.id!=='sf')return;e.preventDefault();const b=$('#sv');b.disabled=1;try{const v=Object.fromEntries(new FormData(e.target));await ad('/settings',{m:'PUT',b:v});CFG=await api('/config');applyBrand();toast('Saved. Customers will see the changes now.');CACHE[ck('admin')]=0}catch(x){toast(x.message,1)}b.disabled=0});
 new MutationObserver(()=>{const f=$('#sf');f&&!f._i&&(f._i=1,pvUpdate(f))}).observe($('#main'),{childList:true});
+function lpv(f){const v=Object.fromEntries(new FormData(f)),b=$('#lpb'),r=$('#rv');if(!b)return;r&&(r.textContent=v.radius);b.innerHTML=tgBtn({text:v.text,style:v.style,size:v.size,color:v.color,radius:v.radius,icon:!!v.icon,wide:!!v.wide})}
+document.addEventListener('input',e=>{const f=e.target.closest('#lf');f&&lpv(f)});
+document.addEventListener('submit',async e=>{if(e.target.id!=='lf')return;e.preventDefault();const b=$('#lsv');b.disabled=1;
+ try{const v=Object.fromEntries(new FormData(e.target)),p={enabled:v.enabled?1:0,client_id:v.client_id.trim(),text:v.text,style:v.style,size:v.size,color:v.color,radius:+v.radius,icon:v.icon?1:0,wide:v.wide?1:0,site_url:location.origin};
+  if(v.client_secret.trim())p.client_secret=v.client_secret.trim();await ad('/login/telegram',{m:'PUT',b:p});CFG=await api('/config');toast('Saved. The login screen is updated.');go('admin',1)}catch(x){toast(x.message,1)}b.disabled=0});
+new MutationObserver(()=>{const f=$('#lf');f&&!f._i&&(f._i=1,lpv(f))}).observe($('#main'),{childList:true});
 function sel(id,on){on?SEL.add(id):SEL.delete(id);$('#bulk').hidden=!SEL.size;$('#bn').textContent=SEL.size}
 function selAll(){document.querySelectorAll('#alist>[data-s]:not([hidden]) .cb').forEach(c=>{c.checked=true;SEL.add(+c.dataset.id)});$('#bulk').hidden=!SEL.size;$('#bn').textContent=SEL.size}
 function bulk(on){const n=SEL.size,ids=[...SEL];act(async()=>{await ad('/services/bulk',{b:{ids,enabled:on}});SEL.clear()},`${n} service${n>1?'s':''} ${on?'enabled':'disabled'}`)}

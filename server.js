@@ -22,7 +22,9 @@ const KEY=crypto.createHash('sha256').update(E.ENC_KEY||E.JWT_SECRET).digest();
 const enc=t=>{const iv=crypto.randomBytes(12),c=crypto.createCipheriv('aes-256-gcm',KEY,iv),b=Buffer.concat([c.update(t,'utf8'),c.final()]);return Buffer.concat([iv,c.getAuthTag(),b]).toString('base64')};
 const dec=s=>{const b=Buffer.from(s,'base64'),d=crypto.createDecipheriv('aes-256-gcm',KEY,b.subarray(0,12));d.setAuthTag(b.subarray(12,28));return Buffer.concat([d.update(b.subarray(28)),d.final()]).toString('utf8')};
 const log=(uid,a,d)=>db.prepare('INSERT INTO logs(user_id,action,detail) VALUES(?,?,?)').run(uid,a,String(d||''));
-const notify=(uid,t)=>db.prepare('INSERT INTO notifications(user_id,text) VALUES(?,?)').run(uid,t);
+async function tgSend(chat,text){if(!E.BOT_TOKEN||!chat)return;try{const r=await fetch(`https://api.telegram.org/bot${E.BOT_TOKEN}/sendMessage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:chat,text:String(text).slice(0,3500),disable_web_page_preview:true}),signal:AbortSignal.timeout(10000)});if(!r.ok)console.warn('Telegram send failed:',r.status)}catch(e){console.warn('Telegram send error:',e.message)}}
+const tgAdmin=t=>String(E.ADMIN_CHAT_ID||'').split(',').map(x=>x.trim()).filter(Boolean).forEach(c=>tgSend(c,t));
+const notify=(uid,t)=>{db.prepare('INSERT INTO notifications(user_id,text) VALUES(?,?)').run(uid,t);const u=db.prepare('SELECT tg_id FROM users WHERE id=?').get(uid);if(u&&u.tg_id)tgSend(u.tg_id,t)};
 const setting=(k,d='')=>{const x=db.prepare('SELECT value FROM settings WHERE key=?').get(k);return x?x.value:d};
 const num=(v,min=-1e9,max=1e9)=>{const n=Number(v);if(!Number.isFinite(n)||n<min||n>max)bad('Invalid number');return n};
 // Must run inside db.transaction(): moves balance + records ledger row
@@ -75,7 +77,7 @@ function confirmPayment(ref,providerRef,amount,by){
     if(providerRef&&db.prepare('SELECT 1 FROM payments WHERE provider_ref=?').get(String(providerRef)))bad('Transaction already used',409);
     money(p.user_id,r4(p.amount+p.bonus),'deposit',`Deposit ${p.ref}`+(p.bonus?` (+bonus ${p.bonus})`:''),p.ref);
     db.prepare("UPDATE payments SET status='paid',provider_ref=?,paid_at=CURRENT_TIMESTAMP WHERE id=?").run(providerRef?String(providerRef):null,p.id);
-    notify(p.user_id,`Deposit $${p.amount} confirmed`);log(by,'payment_confirm',ref);return p})()}
+    notify(p.user_id,`Deposit $${p.amount} confirmed`);log(by,'payment_confirm',ref);tgAdmin(`✅ Deposit confirmed $${p.amount} (${ref})`);return p})()}
 // ---------- app ----------
 const app=express();app.set('trust proxy',1);
 app.use(helmet({contentSecurityPolicy:false,frameguard:false}));
@@ -91,7 +93,7 @@ const adm=(q,s,n)=>q.user.role==='admin'?n():s.status(403).json({error:'Forbidde
 const A=express.Router();app.use('/api/admin',auth,adm,A);
 const str=(v,max=500)=>{v=String(v??'').trim();if(!v||v.length>max)bad('Invalid input');return v};
 app.get('/healthz',(q,s)=>s.send('ok'));
-app.get('/api/config',(q,s)=>s.json({brand:setting('brand','AngKer SMM'),tagline:setting('tagline'),announcement:setting('announcement'),accent:setting('accent'),logo:setting('logo'),support_link:setting('support_link'),tg:!!E.BOT_TOKEN}));
+app.get('/api/config',(q,s)=>s.json({brand:setting('brand','AngKer SMM'),tagline:setting('tagline'),announcement:setting('announcement'),accent:setting('accent'),logo:setting('logo'),support_link:setting('support_link'),tg:!!E.BOT_TOKEN,tgl:tgl()}));
 app.get('/img/:id',(q,s)=>{const r=db.prepare('SELECT mime,data FROM images WHERE id=?').get(q.params.id);if(!r)return s.status(404).end();
   s.set({'Content-Type':r.mime,'Cache-Control':'public, max-age=31536000, immutable','X-Content-Type-Options':'nosniff','Cross-Origin-Resource-Policy':'cross-origin'});s.send(r.data)});
 app.post('/api/auth/register',authLimit,w((q,s)=>{
@@ -99,21 +101,65 @@ app.post('/api/auth/register',authLimit,w((q,s)=>{
   if(!/^\w{3,32}$/.test(u))bad('Username: 3-32 letters, digits or _');if(p.length<8)bad('Password must be 8+ characters');
   if(db.prepare('SELECT 1 FROM users WHERE username=? COLLATE NOCASE').get(u))bad('Username taken',409);
   const id=db.prepare('INSERT INTO users(username,email,pass_hash) VALUES(?,?,?)').run(u,String(q.body.email||'').slice(0,120),bcrypt.hashSync(p,11)).lastInsertRowid;
-  const row=db.prepare('SELECT * FROM users WHERE id=?').get(id);s.json({token:sign(row),user:pub(row)})}));
+  const row=db.prepare('SELECT * FROM users WHERE id=?').get(id);tgAdmin(`🆕 New user: ${u}`);s.json({token:sign(row),user:pub(row)})}));
 app.post('/api/auth/login',authLimit,w((q,s)=>{
   const u=db.prepare('SELECT * FROM users WHERE username=? COLLATE NOCASE').get(String(q.body.username||''));
   if(!u||!u.pass_hash||!bcrypt.compareSync(String(q.body.password||''),u.pass_hash)||u.banned)bad('Invalid username or password',401);
   s.json({token:sign(u),user:pub(u)})}));
+// ---------- Telegram ----------
+const OA=E.TG_OAUTH_BASE||'https://oauth.telegram.org',b64u=x=>Buffer.from(x).toString('base64url');
+const setS=(k,v)=>db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(k,String(v));
+const cookie=(q,n)=>{const m=(q.headers.cookie||'').split(/;\s*/).find(x=>x.startsWith(n+'='));return m?decodeURIComponent(m.slice(n.length+1)):''};
+const TGD={text:'Continue with Telegram',style:'filled',color:'#27a7e7',radius:'12',size:'medium',icon:'1',wide:'1'};
+const tgs=k=>setting('tg_'+k,TGD[k]||'');
+function tgl(){if(setting('tg_enabled')!=='1'||!setting('tg_client_id')||!setting('tg_secret'))return null;
+  return{text:tgs('text'),style:tgs('style'),color:tgs('color'),radius:Number(tgs('radius')),size:tgs('size'),icon:tgs('icon')==='1',wide:tgs('wide')==='1'}}
+const tgUri=q=>(E.PUBLIC_URL||setting('tg_site_url')||q.protocol+'://'+q.get('host')).replace(/\/+$/,'')+'/api/auth/telegram/callback';
+function tgUser(tg,uname){let u=db.prepare('SELECT * FROM users WHERE tg_id=?').get(tg);
+  if(!u){let name=String(uname||'tg'+tg).replace(/\W/g,'_').slice(0,20);if(name.length<3)name='tg_'+tg;
+    if(db.prepare('SELECT 1 FROM users WHERE username=? COLLATE NOCASE').get(name))name+='_'+tg;
+    u=db.prepare('SELECT * FROM users WHERE id=?').get(db.prepare('INSERT INTO users(username,tg_id) VALUES(?,?)').run(name,tg).lastInsertRowid);tgAdmin(`🆕 New user via Telegram: ${name}`)}
+  return u}
+// Telegram Mini App (initData)
 app.post('/api/auth/telegram',authLimit,w((q,s)=>{
   if(!E.BOT_TOKEN)bad('Telegram login not configured',501);
   const p=new URLSearchParams(String(q.body.initData||'')),h=p.get('hash');p.delete('hash');
   const chk=[...p].map(([k,v])=>`${k}=${v}`).sort().join('\n'),sk=crypto.createHmac('sha256','WebAppData').update(E.BOT_TOKEN).digest(),c=crypto.createHmac('sha256',sk).update(chk).digest('hex');
   if(!h||h.length!==c.length||!crypto.timingSafeEqual(Buffer.from(h),Buffer.from(c)))bad('Invalid Telegram data',401);
   if(Date.now()/1e3-Number(p.get('auth_date'))>86400)bad('Telegram session expired',401);
-  const t=JSON.parse(p.get('user')),tg=String(t.id);let u=db.prepare('SELECT * FROM users WHERE tg_id=?').get(tg);
-  if(!u){let name=(t.username||'tg'+tg).replace(/\W/g,'_');if(db.prepare('SELECT 1 FROM users WHERE username=?').get(name))name+='_'+tg;
-    u=db.prepare('SELECT * FROM users WHERE id=?').get(db.prepare('INSERT INTO users(username,tg_id) VALUES(?,?)').run(name,tg).lastInsertRowid)}
+  const t=JSON.parse(p.get('user')),u=tgUser(String(t.id),t.username);
   if(u.banned)bad('Banned',403);s.json({token:sign(u),user:pub(u)})}));
+// "Log in with Telegram" for the website: OpenID Connect, authorization code + PKCE (https://core.telegram.org/bots/telegram-login)
+app.get('/api/auth/telegram/start',authLimit,(q,s)=>{
+  if(!tgl())return s.redirect('/#tgerr='+encodeURIComponent('Telegram login is not available right now'));
+  const st=b64u(crypto.randomBytes(16)),ver=b64u(crypto.randomBytes(48)),non=b64u(crypto.randomBytes(16));
+  s.cookie('tg_oidc',jwt.sign({st,ver,non},E.JWT_SECRET,{expiresIn:'10m'}),{httpOnly:true,sameSite:'lax',secure:q.secure,maxAge:600000,path:'/api/auth/telegram'});
+  s.redirect(OA+'/auth?'+new URLSearchParams({client_id:setting('tg_client_id'),redirect_uri:tgUri(q),response_type:'code',scope:'openid profile',state:st,nonce:non,code_challenge:b64u(crypto.createHash('sha256').update(ver).digest()),code_challenge_method:'S256'}))});
+let JWKS={at:0,keys:[]};
+async function tgKeys(force){if(!force&&JWKS.keys.length&&Date.now()-JWKS.at<36e5)return JWKS.keys;
+  const r=await fetch(OA+'/.well-known/jwks.json',{signal:AbortSignal.timeout(10000)}),j=await r.json();JWKS={at:Date.now(),keys:j.keys||[]};return JWKS.keys}
+app.get('/api/auth/telegram/callback',authLimit,async(q,s)=>{
+  const fail=m=>s.redirect('/#tgerr='+encodeURIComponent(m));
+  try{
+    if(!tgl())bad('Telegram login is not available right now');
+    let c;try{c=jwt.verify(cookie(q,'tg_oidc'),E.JWT_SECRET)}catch{bad('Login session expired. Please try again.')}
+    s.clearCookie('tg_oidc',{path:'/api/auth/telegram'});
+    if(q.query.error)bad('Telegram login was cancelled');
+    if(!q.query.state||q.query.state!==c.st)bad('Login session expired. Please try again.');
+    const code=String(q.query.code||''),cid=setting('tg_client_id');if(!code)bad('Telegram did not return a code');
+    const r=await fetch(OA+'/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded',Authorization:'Basic '+Buffer.from(cid+':'+dec(setting('tg_secret'))).toString('base64')},
+      body:new URLSearchParams({grant_type:'authorization_code',code,redirect_uri:tgUri(q),client_id:cid,code_verifier:c.ver}),signal:AbortSignal.timeout(15000)});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||!j.id_token){console.error('Telegram token exchange failed:',r.status,j.error||'');bad('Telegram rejected the login. Check the Client ID, Client Secret and Allowed URLs in BotFather.')}
+    const dc=jwt.decode(j.id_token,{complete:true});if(!dc)bad('Invalid Telegram response');
+    let k=(await tgKeys()).find(x=>x.kid===dc.header.kid)||(await tgKeys(true)).find(x=>x.kid===dc.header.kid);if(!k)bad('Could not verify the Telegram response');
+    let t;try{t=jwt.verify(j.id_token,crypto.createPublicKey({key:k,format:'jwk'}).export({type:'spki',format:'pem'}),{algorithms:['RS256','ES256'],issuer:'https://oauth.telegram.org',audience:String(cid)})}
+    catch(e){console.error('Telegram id_token invalid:',e.message);bad('Could not verify the Telegram response. In BotFather set the signing algorithm to RS256.')}
+    if(t.nonce&&t.nonce!==c.non)bad('Login session mismatch. Please try again.');
+    const tg=String(t.id||'');if(!/^\d{1,20}$/.test(tg))bad('Telegram did not share your profile. Please try again.');
+    const u=tgUser(tg,t.preferred_username);if(u.banned)bad('This account is banned');
+    s.redirect('/#tgtoken='+encodeURIComponent(sign(u)))
+  }catch(e){if(!(e instanceof HttpErr))console.error('Telegram login:',e.message);fail(e instanceof HttpErr?e.message:'Telegram login failed. Please try again.')}});
 app.get('/api/me',auth,(q,s)=>s.json(pub(q.user)));
 app.post('/api/me/password',auth,w((q,s)=>{
   if(!q.user.pass_hash||!bcrypt.compareSync(String(q.body.old||''),q.user.pass_hash))bad('Current password is wrong');
@@ -131,7 +177,7 @@ app.post('/api/smm/order',auth,w(async(q,s)=>{
   const charge=r4(sv.price*qty/1000); // price always computed server-side
   const id=db.transaction(()=>{money(q.user.id,-charge,'purchase',`SMM service #${sv.id} x${qty}`);
     return db.prepare('INSERT INTO smm_orders(user_id,service_id,link,quantity,charge) VALUES(?,?,?,?,?)').run(q.user.id,sv.id,link,qty,charge).lastInsertRowid})();
-  await submit(id);s.json(db.prepare('SELECT * FROM smm_orders WHERE id=?').get(id))}));
+  await submit(id);tgAdmin(`🛒 SMM order #${id}: ${sv.name} x${qty} = $${charge} by ${q.user.username}`);s.json(db.prepare('SELECT * FROM smm_orders WHERE id=?').get(id))}));
 app.get('/api/smm/orders',auth,(q,s)=>s.json(db.prepare('SELECT o.*,s.name service_name,s.category FROM smm_orders o JOIN services s ON s.id=o.service_id WHERE o.user_id=? ORDER BY o.id DESC LIMIT 100').all(q.user.id)));
 // Store
 const stockSql=`CASE WHEN delivery_type='auto' THEN (SELECT COUNT(*) FROM inventory i WHERE i.product_id=products.id AND i.sold_order IS NULL) ELSE stock END`;
@@ -147,7 +193,7 @@ app.post('/api/store/buy',auth,w((q,s)=>{
     money(q.user.id,-total,'purchase',`${p.name} x${qty}`);
     const id=db.prepare('INSERT INTO digital_orders(user_id,product_id,product_name,quantity,price,status,delivery) VALUES(?,?,?,?,?,?,?)').run(q.user.id,p.id,p.name,qty,total,status,delivery).lastInsertRowid;
     for(const r of rows)db.prepare('UPDATE inventory SET sold_order=? WHERE id=?').run(id,r.id);return id})();
-  s.json({id:out})}));
+  tgAdmin(`🛍 Store order #${out} by ${q.user.username}`);s.json({id:out})}));
 app.get('/api/store/orders',auth,(q,s)=>s.json(db.prepare('SELECT * FROM digital_orders WHERE user_id=? ORDER BY id DESC LIMIT 100').all(q.user.id).map(o=>({...o,delivery:o.delivery?dec(o.delivery):null}))));
 // Wallet
 app.get('/api/wallet',auth,(q,s)=>s.json({balance:q.user.balance,
@@ -159,7 +205,7 @@ app.post('/api/wallet/deposit',auth,w((q,s)=>{
   if(q.body.promo){const pr=db.prepare('SELECT * FROM promos WHERE code=? COLLATE NOCASE AND active=1').get(String(q.body.promo));if(!pr)bad('Invalid promo code');bonus=r4(amount*pr.bonus_percent/100)}
   const ref='DP'+crypto.randomBytes(4).toString('hex').toUpperCase();
   db.prepare('INSERT INTO payments(user_id,amount,bonus,ref) VALUES(?,?,?,?)').run(q.user.id,amount,bonus,ref);
-  s.json({ref,amount,bonus})}));
+  tgAdmin(`💰 Deposit request $${amount} by ${q.user.username} (${ref})`);s.json({ref,amount,bonus})}));
 // Provider webhook: your KHQR provider posts {ref, amount, tx_id}. Adapt field names to the provider docs.
 app.post('/api/payments/webhook',w((q,s)=>{
   const a=Buffer.from(String(q.headers['x-webhook-secret']||'')),b=Buffer.from(E.PAYMENT_WEBHOOK_SECRET||'\0');
@@ -167,7 +213,7 @@ app.post('/api/payments/webhook',w((q,s)=>{
   confirmPayment(str(q.body.ref,40),q.body.tx_id,q.body.amount,null);s.json({ok:1})}));
 // Tickets
 app.get('/api/tickets',auth,(q,s)=>s.json(db.prepare(`SELECT t.*,u.username FROM tickets t JOIN users u ON u.id=t.user_id ${q.user.role==='admin'?'':'WHERE t.user_id='+q.user.id} ORDER BY t.id DESC LIMIT 100`).all()));
-app.post('/api/tickets',auth,w((q,s)=>{db.transaction(()=>{const id=db.prepare('INSERT INTO tickets(user_id,subject) VALUES(?,?)').run(q.user.id,str(q.body.subject,120)).lastInsertRowid;db.prepare('INSERT INTO ticket_msgs(ticket_id,user_id,body) VALUES(?,?,?)').run(id,q.user.id,str(q.body.message,2000))})();s.json({ok:1})}));
+app.post('/api/tickets',auth,w((q,s)=>{db.transaction(()=>{const id=db.prepare('INSERT INTO tickets(user_id,subject) VALUES(?,?)').run(q.user.id,str(q.body.subject,120)).lastInsertRowid;db.prepare('INSERT INTO ticket_msgs(ticket_id,user_id,body) VALUES(?,?,?)').run(id,q.user.id,str(q.body.message,2000))})();tgAdmin(`🎫 New support ticket from ${q.user.username}`);s.json({ok:1})}));
 const tk=(q)=>{const t=db.prepare('SELECT * FROM tickets WHERE id=?').get(q.params.id);if(!t||(t.user_id!==q.user.id&&q.user.role!=='admin'))bad('Not found',404);return t};
 app.get('/api/tickets/:id',auth,w((q,s)=>{const t=tk(q);s.json({ticket:t,messages:db.prepare('SELECT * FROM ticket_msgs WHERE ticket_id=? ORDER BY id').all(t.id)})}));
 app.post('/api/tickets/:id/reply',auth,w((q,s)=>{const t=tk(q),ad=q.user.role==='admin'?1:0;
@@ -225,7 +271,24 @@ const CHK={accent:/^(#[0-9a-f]{6})?$/i,logo:/^(\/img\/\d+|https?:\/\/\S+)?$/i,kh
 A.get('/settings',(q,s)=>s.json(Object.fromEntries(SK.map(k=>[k,setting(k)]))));
 A.put('/settings',(q,s)=>{for(const k in CHK)if(q.body[k]!==undefined&&!CHK[k].test(String(q.body[k]).trim()))bad({accent:'Accent must be a colour like #1769e0',logo:'Logo must be an uploaded image or an https link',khqr_image:'KHQR image must be an uploaded image or an https link',support_link:'Support link must start with https:// or tg://'}[k]);
   for(const k of SK)if(q.body[k]!==undefined)db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(k,String(q.body[k]).slice(0,1000));log(q.user.id,'settings','updated');s.json({ok:1})});
+A.get('/login',(q,s)=>s.json({telegram:{enabled:setting('tg_enabled')==='1',client_id:setting('tg_client_id'),secret_set:!!setting('tg_secret'),text:tgs('text'),style:tgs('style'),color:tgs('color'),radius:Number(tgs('radius')),size:tgs('size'),icon:tgs('icon')==='1',wide:tgs('wide')==='1'}}));
+A.put('/login/telegram',w((q,s)=>{const b=q.body,v={};
+  if(b.client_id!==undefined){const c=String(b.client_id).trim();if(c&&!/^\d{4,20}$/.test(c))bad('Client ID must be the number shown in BotFather');v.client_id=c}
+  if(b.client_secret!==undefined&&String(b.client_secret).trim()){const c=String(b.client_secret).trim();if(c.length<8||c.length>300)bad('Client Secret looks wrong');v.secret=enc(c)}
+  if(b.text!==undefined)v.text=str(b.text,40);
+  if(b.style!==undefined){if(!['filled','outline','soft'].includes(b.style))bad('Invalid style');v.style=b.style}
+  if(b.size!==undefined){if(!['small','medium','large'].includes(b.size))bad('Invalid size');v.size=b.size}
+  if(b.color!==undefined){if(!/^#[0-9a-f]{6}$/i.test(String(b.color)))bad('Colour must look like #27a7e7');v.color=b.color}
+  if(b.radius!==undefined)v.radius=Math.round(num(b.radius,0,30));
+  if(b.icon!==undefined)v.icon=b.icon?1:0;if(b.wide!==undefined)v.wide=b.wide?1:0;
+  if(b.site_url!==undefined){const u=String(b.site_url).trim().replace(/\/+$/,'');if(!/^https?:\/\/[^\s\/]+$/.test(u))bad('Invalid website URL');v.site_url=u}
+  const clear=!!b.clear_secret,cid=v.client_id!==undefined?v.client_id:setting('tg_client_id'),hasSec=clear?false:(v.secret||setting('tg_secret'));
+  const en=clear?0:(b.enabled!==undefined?(b.enabled?1:0):(setting('tg_enabled')==='1'?1:0));
+  if(en&&(!cid||!hasSec))bad('Add the Client ID and Client Secret first');
+  db.transaction(()=>{for(const k in v)setS('tg_'+k,v[k]);if(clear)db.prepare("DELETE FROM settings WHERE key='tg_secret'").run();setS('tg_enabled',en)})();
+  log(q.user.id,'login_settings',clear?'telegram secret removed':'telegram updated');s.json({ok:1})}));
 A.get('/logs',(q,s)=>s.json(db.prepare('SELECT l.*,u.username FROM logs l LEFT JOIN users u ON u.id=l.user_id ORDER BY l.id DESC LIMIT 200').all()));
+app.get('/admin1',(q,s)=>s.sendFile(path.join(__dirname,'public','index.html')));
 app.use(express.static(path.join(__dirname,'public')));
 app.use('/api',(q,s)=>s.status(404).json({error:'Not found'}));
 app.use((e,q,s,n)=>{if(e instanceof HttpErr)return s.status(e.code).json({error:e.message});console.error(e);s.status(500).json({error:'Server error'})});
@@ -233,4 +296,6 @@ if(E.ADMIN_USERNAME&&E.ADMIN_PASSWORD){
   const ex=db.prepare('SELECT * FROM users WHERE username=? COLLATE NOCASE').get(E.ADMIN_USERNAME),h=bcrypt.hashSync(E.ADMIN_PASSWORD,11);
   if(!ex&&!db.prepare("SELECT 1 FROM users WHERE role='admin'").get()){db.prepare("INSERT INTO users(username,email,pass_hash,role) VALUES(?,?,?,'admin')").run(E.ADMIN_USERNAME,E.ADMIN_EMAIL||null,h);console.log('Admin created:',E.ADMIN_USERNAME)}
   else if(ex&&E.ADMIN_RESET==='1'){db.prepare("UPDATE users SET pass_hash=?,email=COALESCE(?,email),role='admin',banned=0 WHERE id=?").run(h,E.ADMIN_EMAIL||null,ex.id);console.log('Admin password reset:',ex.username)}}
-app.listen(E.PORT||3000,'0.0.0.0',()=>console.log('Running on :'+(E.PORT||3000)));
+app.listen(E.PORT||3000,'0.0.0.0',()=>{console.log('Running on :'+(E.PORT||3000));
+  tgAdmin(`🟢 ${setting('brand','Website')} is online`+(E.RENDER_GIT_COMMIT?` (version ${E.RENDER_GIT_COMMIT.slice(0,7)})`:'')+(E.PUBLIC_URL||setting('tg_site_url')?`
+${E.PUBLIC_URL||setting('tg_site_url')}`:''))});

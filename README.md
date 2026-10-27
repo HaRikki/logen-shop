@@ -35,3 +35,13 @@ Prices and balance checks are server-side inside DB transactions; supplier/payme
 
 ## Branding and editor
 Account → Admin panel → **Site editor**: upload your logo, set shop name, tagline, accent colour, announcement banner, support link and KHQR image, with a live preview. Uploaded images are stored in the database (`images` table), so keep the persistent disk. In **Services**, filter by Disabled, tick services and use Enable / Disable to publish imported services in bulk.
+
+## Log in with Telegram (website button)
+Admin panel -> **Login** tab. Uses Telegram's OpenID Connect flow (authorization code + PKCE), verified on the server (RS256 id_token, issuer, audience, nonce).
+1. @BotFather -> your bot -> **Login Widget**: add the Website URL and the Redirect URL shown in the Login tab as Allowed URLs.
+2. Copy the **Client ID** and **Client Secret** from BotFather into the Login tab, switch it on, press Save.
+3. Style the button in **Button editor** (text, colour, style, size, radius, icon, full width) with a live preview.
+The secret is stored AES-256-GCM encrypted and is never sent back to the browser. BOT_TOKEN is only used for the Telegram Mini App auto-login; never commit it.
+
+## Bot messages
+With `BOT_TOKEN` and `ADMIN_CHAT_ID` set, the bot messages the admin when the site starts (every deploy), and on new users, deposits, orders and tickets. Customers who logged in with Telegram also get their order/deposit notifications in the bot chat (they must have pressed Start on the bot once).
