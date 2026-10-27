@@ -79,6 +79,7 @@ function confirmPayment(ref,providerRef,amount,by){
 // ---------- app ----------
 const app=express();app.set('trust proxy',1);
 app.use(helmet({contentSecurityPolicy:false,frameguard:false}));
+app.use('/api/admin/upload',express.json({limit:'1mb'}));
 app.use(express.json({limit:'100kb'}));
 app.use('/api',rateLimit({windowMs:60000,limit:120,standardHeaders:true,legacyHeaders:false}));
 const authLimit=rateLimit({windowMs:15*60000,limit:20});
@@ -90,7 +91,9 @@ const adm=(q,s,n)=>q.user.role==='admin'?n():s.status(403).json({error:'Forbidde
 const A=express.Router();app.use('/api/admin',auth,adm,A);
 const str=(v,max=500)=>{v=String(v??'').trim();if(!v||v.length>max)bad('Invalid input');return v};
 app.get('/healthz',(q,s)=>s.send('ok'));
-app.get('/api/config',(q,s)=>s.json({brand:setting('brand','AngKer SMM'),announcement:setting('announcement'),tg:!!E.BOT_TOKEN}));
+app.get('/api/config',(q,s)=>s.json({brand:setting('brand','AngKer SMM'),tagline:setting('tagline'),announcement:setting('announcement'),accent:setting('accent'),logo:setting('logo'),support_link:setting('support_link'),tg:!!E.BOT_TOKEN}));
+app.get('/img/:id',(q,s)=>{const r=db.prepare('SELECT mime,data FROM images WHERE id=?').get(q.params.id);if(!r)return s.status(404).end();
+  s.set({'Content-Type':r.mime,'Cache-Control':'public, max-age=31536000, immutable','X-Content-Type-Options':'nosniff','Cross-Origin-Resource-Policy':'cross-origin'});s.send(r.data)});
 app.post('/api/auth/register',authLimit,w((q,s)=>{
   const u=str(q.body.username,32),p=String(q.body.password||'');
   if(!/^\w{3,32}$/.test(u))bad('Username: 3-32 letters, digits or _');if(p.length<8)bad('Password must be 8+ characters');
@@ -187,6 +190,11 @@ A.get('/services',(q,s)=>s.json(db.prepare('SELECT * FROM services ORDER BY cate
 A.post('/services',w((q,s)=>{const b=q.body;s.json({id:db.prepare('INSERT INTO services(category,name,description,price,cost,min_qty,max_qty,delivery,supplier_service) VALUES(?,?,?,?,?,?,?,?,?)').run(str(b.category,40),str(b.name,200),String(b.description||''),num(b.price,0),num(b.cost||0,0),num(b.min_qty,1),num(b.max_qty,1),String(b.delivery||''),b.supplier_service||null).lastInsertRowid})}));
 A.put('/services/:id',w((q,s)=>{upd('services',q.params.id,q.body,SF);log(q.user.id,'service_edit',q.params.id);s.json({ok:1})}));
 A.delete('/services/:id',w((q,s)=>{try{db.prepare('DELETE FROM services WHERE id=?').run(q.params.id)}catch{bad('Service has orders; disable it instead')}s.json({ok:1})}));
+A.post('/upload',w((q,s)=>{const m=/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String(q.body.data||''));if(!m)bad('Upload a PNG, JPG or WebP image');
+  const buf=Buffer.from(m[2],'base64');if(buf.length>700*1024)bad('Image is too large (max 700 KB)');
+  const id=db.prepare('INSERT INTO images(mime,data) VALUES(?,?)').run(m[1],buf).lastInsertRowid;log(q.user.id,'image_upload',id);s.json({url:'/img/'+id})}));
+A.post('/services/bulk',w((q,s)=>{const ids=(Array.isArray(q.body.ids)?q.body.ids:[]).map(Number).filter(Number.isInteger).slice(0,1000);if(!ids.length)bad('Select at least one service');
+  db.prepare(`UPDATE services SET enabled=? WHERE id IN (${ids.map(()=>'?').join(',')})`).run(q.body.enabled?1:0,...ids);log(q.user.id,'service_bulk',`${ids.length} -> ${q.body.enabled?'on':'off'}`);s.json({ok:1,count:ids.length})}));
 A.get('/supplier/status',w(async(q,s)=>{try{const r=await sup({action:'balance'});s.json({connected:!r.error,balance:r.balance,currency:r.currency,error:r.error})}catch(e){s.json({connected:false,error:e.message})}}));
 A.post('/services/import',w(async(q,s)=>{
   const markup=num(q.body.markup??30,0,1000),list=await sup({action:'services'});if(!Array.isArray(list))bad('Supplier returned an error: '+(list&&list.error));
@@ -212,13 +220,17 @@ A.post('/orders/digital/:id/deliver',w((q,s)=>{const o=db.prepare('SELECT * FROM
 A.get('/promos',(q,s)=>s.json(db.prepare('SELECT * FROM promos').all()));
 A.post('/promos',w((q,s)=>{db.prepare('INSERT INTO promos(code,title,bonus_percent) VALUES(?,?,?)').run(str(q.body.code,30),String(q.body.title||''),num(q.body.bonus_percent,0,500));s.json({ok:1})}));
 A.delete('/promos/:id',(q,s)=>{db.prepare('DELETE FROM promos WHERE id=?').run(q.params.id);s.json({ok:1})});
-const SK=['brand','announcement','aba_name','aba_account','khqr_image','min_deposit'];
+const SK=['brand','tagline','announcement','accent','logo','support_link','aba_name','aba_account','khqr_image','min_deposit'];
+const CHK={accent:/^(#[0-9a-f]{6})?$/i,logo:/^(\/img\/\d+|https?:\/\/\S+)?$/i,khqr_image:/^(\/img\/\d+|https?:\/\/\S+)?$/i,support_link:/^(https?:\/\/\S+|tg:\/\/\S+)?$/i};
 A.get('/settings',(q,s)=>s.json(Object.fromEntries(SK.map(k=>[k,setting(k)]))));
-A.put('/settings',(q,s)=>{for(const k of SK)if(q.body[k]!==undefined)db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(k,String(q.body[k]).slice(0,1000));log(q.user.id,'settings','updated');s.json({ok:1})});
+A.put('/settings',(q,s)=>{for(const k in CHK)if(q.body[k]!==undefined&&!CHK[k].test(String(q.body[k]).trim()))bad({accent:'Accent must be a colour like #1769e0',logo:'Logo must be an uploaded image or an https link',khqr_image:'KHQR image must be an uploaded image or an https link',support_link:'Support link must start with https:// or tg://'}[k]);
+  for(const k of SK)if(q.body[k]!==undefined)db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(k,String(q.body[k]).slice(0,1000));log(q.user.id,'settings','updated');s.json({ok:1})});
 A.get('/logs',(q,s)=>s.json(db.prepare('SELECT l.*,u.username FROM logs l LEFT JOIN users u ON u.id=l.user_id ORDER BY l.id DESC LIMIT 200').all()));
 app.use(express.static(path.join(__dirname,'public')));
 app.use('/api',(q,s)=>s.status(404).json({error:'Not found'}));
 app.use((e,q,s,n)=>{if(e instanceof HttpErr)return s.status(e.code).json({error:e.message});console.error(e);s.status(500).json({error:'Server error'})});
-if(E.ADMIN_USERNAME&&E.ADMIN_PASSWORD&&!db.prepare("SELECT 1 FROM users WHERE role='admin'").get()){
-  db.prepare("INSERT INTO users(username,pass_hash,role) VALUES(?,?,'admin')").run(E.ADMIN_USERNAME,bcrypt.hashSync(E.ADMIN_PASSWORD,11));console.log('Admin created:',E.ADMIN_USERNAME)}
+if(E.ADMIN_USERNAME&&E.ADMIN_PASSWORD){
+  const ex=db.prepare('SELECT * FROM users WHERE username=? COLLATE NOCASE').get(E.ADMIN_USERNAME),h=bcrypt.hashSync(E.ADMIN_PASSWORD,11);
+  if(!ex&&!db.prepare("SELECT 1 FROM users WHERE role='admin'").get()){db.prepare("INSERT INTO users(username,email,pass_hash,role) VALUES(?,?,?,'admin')").run(E.ADMIN_USERNAME,E.ADMIN_EMAIL||null,h);console.log('Admin created:',E.ADMIN_USERNAME)}
+  else if(ex&&E.ADMIN_RESET==='1'){db.prepare("UPDATE users SET pass_hash=?,email=COALESCE(?,email),role='admin',banned=0 WHERE id=?").run(h,E.ADMIN_EMAIL||null,ex.id);console.log('Admin password reset:',ex.username)}}
 app.listen(E.PORT||3000,'0.0.0.0',()=>console.log('Running on :'+(E.PORT||3000)));

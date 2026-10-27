@@ -32,3 +32,6 @@ Push to GitHub → New Blueprint (uses `render.yaml`, persistent disk at /var/da
 
 ## Security notes
 Prices and balance checks are server-side inside DB transactions; supplier/payment secrets live only in env; rate limits on API and auth; refunds are automatic for Failed/Cancelled/Partial orders; admin actions are written to the audit log. Back up the SQLite file regularly.
+
+## Branding and editor
+Account → Admin panel → **Site editor**: upload your logo, set shop name, tagline, accent colour, announcement banner, support link and KHQR image, with a live preview. Uploaded images are stored in the database (`images` table), so keep the persistent disk. In **Services**, filter by Disabled, tick services and use Enable / Disable to publish imported services in bulk.

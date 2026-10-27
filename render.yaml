@@ -16,6 +16,7 @@ services:
       - {key: JWT_SECRET, generateValue: true}
       - {key: ENC_KEY, generateValue: true}
       - {key: ADMIN_USERNAME, value: admin}
+      - {key: ADMIN_EMAIL, sync: false}
       - {key: ADMIN_PASSWORD, sync: false}
       - {key: SUPPLIER_API_URL, sync: false}
       - {key: SUPPLIER_API_KEY, sync: false}
