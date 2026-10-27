@@ -25,7 +25,9 @@ Confirmation is idempotent and `tx_id` is unique, so a payment can never be cred
 ## Telegram Mini App
 Set BOT_TOKEN, host over HTTPS, and set the bot's Menu Button / Web App URL to your site. `initData` is verified (HMAC + 24h expiry) at `/api/auth/telegram`.
 
-## Deploy (Render)
+## Deploy (Render only)
+The repo root must contain `package.json`, `server.js` and `render.yaml` directly (do not push the parent folder). This app is a long-running Node server with a SQLite file, so it cannot run on Vercel or Netlify (serverless, read-only/ephemeral disk, no background jobs). Use Render (paid plan + disk), Railway or Fly.io (with a volume), or any VPS.
+
 Push to GitHub → New Blueprint (uses `render.yaml`, persistent disk at /var/data). Set the `sync:false` env vars in the dashboard.
 
 ## Security notes

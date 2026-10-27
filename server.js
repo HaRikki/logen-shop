@@ -2,7 +2,9 @@ require('dotenv').config();
 const express=require('express'),helmet=require('helmet'),rateLimit=require('express-rate-limit'),jwt=require('jsonwebtoken'),bcrypt=require('bcryptjs'),crypto=require('crypto'),path=require('path'),fs=require('fs'),Database=require('better-sqlite3');
 const E=process.env;
 if(!E.JWT_SECRET||E.JWT_SECRET.length<24){console.error('Set JWT_SECRET (24+ chars) in .env');process.exit(1)}
-const db=new Database(E.DB_PATH||'./data.db');
+const DB_FILE=E.DB_PATH||'./data.db';
+try{fs.mkdirSync(path.dirname(path.resolve(DB_FILE)),{recursive:true})}catch(e){console.error('Cannot create DB folder:',e.message)}
+const db=new Database(DB_FILE);
 db.pragma('journal_mode=WAL');db.pragma('foreign_keys=ON');
 db.exec(fs.readFileSync(path.join(__dirname,'schema.sql'),'utf8'));
 class HttpErr extends Error{constructor(c,m){super(m);this.code=c}}
@@ -79,6 +81,7 @@ function auth(q,s,n){try{const{id}=jwt.verify((q.headers.authorization||'').slic
 const adm=(q,s,n)=>q.user.role==='admin'?n():s.status(403).json({error:'Forbidden'});
 const A=express.Router();app.use('/api/admin',auth,adm,A);
 const str=(v,max=500)=>{v=String(v??'').trim();if(!v||v.length>max)bad('Invalid input');return v};
+app.get('/healthz',(q,s)=>s.send('ok'));
 app.get('/api/config',(q,s)=>s.json({brand:setting('brand','AngKer SMM'),announcement:setting('announcement'),tg:!!E.BOT_TOKEN}));
 app.post('/api/auth/register',authLimit,w((q,s)=>{
   const u=str(q.body.username,32),p=String(q.body.password||'');
@@ -210,4 +213,4 @@ app.use('/api',(q,s)=>s.status(404).json({error:'Not found'}));
 app.use((e,q,s,n)=>{if(e instanceof HttpErr)return s.status(e.code).json({error:e.message});console.error(e);s.status(500).json({error:'Server error'})});
 if(E.ADMIN_USERNAME&&E.ADMIN_PASSWORD&&!db.prepare("SELECT 1 FROM users WHERE role='admin'").get()){
   db.prepare("INSERT INTO users(username,pass_hash,role) VALUES(?,?,'admin')").run(E.ADMIN_USERNAME,bcrypt.hashSync(E.ADMIN_PASSWORD,11));console.log('Admin created:',E.ADMIN_USERNAME)}
-app.listen(E.PORT||3000,()=>console.log('Running on :'+(E.PORT||3000)));
+app.listen(E.PORT||3000,'0.0.0.0',()=>console.log('Running on :'+(E.PORT||3000)));

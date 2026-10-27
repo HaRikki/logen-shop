@@ -1,11 +1,17 @@
+# Render Blueprint. Needs a PAID instance because SQLite needs a persistent disk
+# (Render's free plan has no disks and wipes files on every deploy / spin-down).
 services:
   - type: web
     name: smm-digital-store
     runtime: node
+    plan: starter
+    region: singapore
     buildCommand: npm install
     startCommand: npm start
+    healthCheckPath: /healthz
     disk: {name: data, mountPath: /var/data, sizeGB: 1}
     envVars:
+      - {key: NODE_VERSION, value: "22"}
       - {key: DB_PATH, value: /var/data/data.db}
       - {key: JWT_SECRET, generateValue: true}
       - {key: ENC_KEY, generateValue: true}
