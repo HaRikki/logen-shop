@@ -1,9 +1,17 @@
 require('dotenv').config();
 const express=require('express'),helmet=require('helmet'),rateLimit=require('express-rate-limit'),jwt=require('jsonwebtoken'),bcrypt=require('bcryptjs'),crypto=require('crypto'),path=require('path'),fs=require('fs'),Database=require('better-sqlite3');
 const E=process.env;
-if(!E.JWT_SECRET||E.JWT_SECRET.length<24){console.error('Set JWT_SECRET (24+ chars) in .env');process.exit(1)}
 const DB_FILE=E.DB_PATH||'./data.db';
 try{fs.mkdirSync(path.dirname(path.resolve(DB_FILE)),{recursive:true})}catch(e){console.error('Cannot create DB folder:',e.message)}
+// If JWT_SECRET / ENC_KEY are not set in the environment, generate them once and keep them beside the DB file.
+if(!E.JWT_SECRET||E.JWT_SECRET.length<24||!E.ENC_KEY){
+  const sf=path.join(path.dirname(path.resolve(DB_FILE)),'secrets.json');let sec={};
+  try{sec=JSON.parse(fs.readFileSync(sf,'utf8'))}catch{}
+  if(!sec.JWT_SECRET)sec.JWT_SECRET=crypto.randomBytes(32).toString('hex');
+  if(!sec.ENC_KEY)sec.ENC_KEY=crypto.randomBytes(32).toString('hex');
+  try{fs.writeFileSync(sf,JSON.stringify(sec),{mode:0o600})}catch(e){console.warn('WARNING: cannot persist secrets; set JWT_SECRET and ENC_KEY env vars.',e.message)}
+  if(!E.JWT_SECRET||E.JWT_SECRET.length<24){E.JWT_SECRET=sec.JWT_SECRET;console.warn('JWT_SECRET not set: using auto-generated secret stored next to the database.')}
+  if(!E.ENC_KEY)E.ENC_KEY=sec.ENC_KEY}
 const db=new Database(DB_FILE);
 db.pragma('journal_mode=WAL');db.pragma('foreign_keys=ON');
 db.exec(fs.readFileSync(path.join(__dirname,'schema.sql'),'utf8'));
